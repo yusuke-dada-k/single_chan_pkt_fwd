@@ -1,12 +1,12 @@
 {
   "SX127x_conf":
   {
-    "freq": 868100000,
+    "freq": 915000000,
     "spread_factor": 7,
-    "pin_nss": 8,
+    "pin_nss": 10,
     "pin_dio0": 6,
-    "pin_rst": 3,
-    "pin_led1":4
+    "pin_rst": 21,
+    "pin_led1": 7
   },
   "gateway_conf":
   {
@@ -21,12 +21,7 @@
     "servers":
     [
       {
-        "address": "router.eu.staging.thethings.network",
-        "port": 1700,
-        "enabled": true
-      },
-      {
-        "address": "router.eu.thethings.network",
+        "address": "127.0.0.1",
         "port": 1700,
         "enabled": false
       }
