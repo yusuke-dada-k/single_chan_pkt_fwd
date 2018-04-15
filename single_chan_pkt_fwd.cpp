@@ -131,6 +131,7 @@ int ssPin = 0xff;
 int dio0  = 0xff;
 int RST   = 0xff;
 int Led1  = 0xff;
+int Led2  = 0xff;      /* life led */
 
 // Set location in global_conf.json
 float lat =  0.0;
@@ -147,6 +148,7 @@ char description[64] ; /* used for free form description */
 SpreadingFactor_t sf = SF7;
 uint16_t bw = 125;
 uint32_t freq = 868100000; // in Mhz! (868.1)
+uint8_t sync_word = 0x34;  // public LoRaWAN as default
 
 
 // Servers
@@ -326,7 +328,9 @@ void SetupLoRa()
   printf("NSS=%s "  , PinName(ssPin, buff));
   printf("DIO0=%s " , PinName(dio0 , buff));
   printf("Reset=%s ", PinName(RST  , buff));
-  printf("Led1=%s\n", PinName(Led1 , buff));
+  printf("Led1=%s ",  PinName(Led1 , buff));
+  printf("Led2=%s ", PinName(Led2 , buff));
+  printf("SyncWord=0x%02X\n", sync_word);
   
   // check basic 
   if (ssPin == 0xff || dio0 == 0xff) {
@@ -369,7 +373,8 @@ void SetupLoRa()
   WriteRegister(REG_FRF_MID, (uint8_t)(frf >> 8) );
   WriteRegister(REG_FRF_LSB, (uint8_t)(frf >> 0) );
 
-  WriteRegister(REG_SYNC_WORD, 0x34); // LoRaWAN public sync word
+  // set sync word (18=0x12:private LoRa, 52=0x34:public LoRaWAN)
+  WriteRegister(REG_SYNC_WORD, sync_word);
 
   if (sx1272) {
     if (sf == SF11 || sf == SF12) {
@@ -672,6 +677,12 @@ int main()
   pinMode(dio0, INPUT);
   pinMode(RST, OUTPUT);
 
+  // Init SPI
+  wiringPiSPISetup(SPI_CHANNEL, 500000);
+
+  // Setup LORA
+  SetupLoRa();
+
   // LED ?
   if (Led1 != 0xff) {
     pinMode(Led1, OUTPUT);
@@ -679,17 +690,15 @@ int main()
     // Blink to indicate startup
     for (uint8_t i=0; i<5 ; i++) {
       digitalWrite(Led1, 1);
-      delay(200);
+      delay(50);
       digitalWrite(Led1, 0);
-      delay(200);
+      delay(50);
     }
   }
-
-  // Init SPI
-  wiringPiSPISetup(SPI_CHANNEL, 500000);
-
-  // Setup LORA
-  SetupLoRa();
+  if (Led2 != 0xff) {
+    pinMode(Led2, OUTPUT);
+    digitalWrite(Led2, 1);
+  }
 
   // Prepare Socket connection
   if ((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
@@ -790,6 +799,8 @@ void LoadConfiguration(string configurationFile)
             freq = confIt->value.GetUint();
           } else if (key.compare("spread_factor") == 0) {
             sf = (SpreadingFactor_t)confIt->value.GetUint();
+          } else if (key.compare("sync_word") == 0) {
+            sync_word = (uint8_t)(0xffU & confIt->value.GetUint());
           } else if (key.compare("pin_nss") == 0) {
             ssPin = confIt->value.GetUint();
           } else if (key.compare("pin_dio0") == 0) {
@@ -798,6 +809,8 @@ void LoadConfiguration(string configurationFile)
             RST = confIt->value.GetUint();
           } else if (key.compare("pin_led1") == 0) {
             Led1 = confIt->value.GetUint();
+          } else if (key.compare("pin_led2") == 0) {
+            Led2 = confIt->value.GetUint();
           }
         }
       }
