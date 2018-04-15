@@ -70,6 +70,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <netdb.h>
+#include <signal.h>
 
 #include <cstdlib>
 #include <cstdint>
@@ -228,6 +229,14 @@ vector<Server_t> servers;
 
 void LoadConfiguration(string filename);
 void PrintConfiguration();
+
+//Flag for Ctrl-C
+volatile sig_atomic_t force_exit = 0;
+
+void sig_handler(int sig)
+{
+  force_exit=true;
+}
 
 void Die(const char *s)
 {
@@ -651,6 +660,9 @@ int main()
   uint32_t lasttime;
   unsigned int led1_timer;
 
+  // caught CTRL-C to do clean-up
+  signal(SIGINT, sig_handler);
+
   LoadConfiguration("global_conf.json");
   PrintConfiguration();
 
@@ -704,7 +716,7 @@ int main()
   printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
   printf("-----------------------------------\n");
 
-  while(1) {
+  while (!force_exit) {
 
     // Packet received ?
     if (Receivepacket()) {
@@ -744,6 +756,16 @@ int main()
     // Let some time to the OS
     delay(1);
   }
+  printf("\nBreak received, exiting!\n");
+
+  // All module LEDs off
+  if (Led1 != 0xff) {
+    digitalWrite(Led1, 0);
+  }
+
+  // Reset
+  digitalWrite(RST, LOW);
+  delay(100);
 
   return (0);
 }
