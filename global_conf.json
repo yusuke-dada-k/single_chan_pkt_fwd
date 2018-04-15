@@ -3,10 +3,12 @@
   {
     "freq": 915000000,
     "spread_factor": 7,
+    "sync_word": 52,
     "pin_nss": 10,
     "pin_dio0": 6,
     "pin_rst": 21,
-    "pin_led1": 7
+    "pin_led1": 7,
+    "pin_led2": 1
   },
   "gateway_conf":
   {
