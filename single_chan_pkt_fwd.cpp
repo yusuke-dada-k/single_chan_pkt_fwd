@@ -771,6 +771,10 @@ int main()
   if (Led1 != 0xff) {
     digitalWrite(Led1, 0);
   }
+  if (Led2 != 0xff) {
+    digitalWrite(Led2, 0);
+  }
+
 
   // CS Ping as output and set to 1
   // to avoid any problem with SPI sharing
