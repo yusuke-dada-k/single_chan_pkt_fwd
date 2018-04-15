@@ -772,9 +772,14 @@ int main()
     digitalWrite(Led1, 0);
   }
 
+  // CS Ping as output and set to 1
+  // to avoid any problem with SPI sharing
+  UnselectReceiver();
+  delay(150);
+
   // Reset
   digitalWrite(RST, LOW);
-  delay(100);
+  delay(150);
 
   return (0);
 }
