@@ -1,9 +1,9 @@
 {
   "SX127x_conf":
   {
-    "freq": 915000000,
-    "spread_factor": 7,
-    "sync_word": 52,
+    "freq": 922400000,
+    "spread_factor": 9,
+    "sync_word": 18,
     "pin_nss": 10,
     "pin_dio0": 6,
     "pin_rst": 21,
@@ -14,11 +14,11 @@
   {
     "ref_latitude": 0.0,
     "ref_longitude": 0.0,
-    "ref_altitude": 10,
+    "ref_altitude": 0,
 
-    "name": "SC Gateway",
-    "email": "contact@whatever.com",
-    "desc": "Dragino Single Channel Gateway on RPI",
+    "name": "raspiloragw",
+    "email": "gachapin.2nd@gmail.com",
+    "desc": "Raspi LoRa Single Channel Gateway",
 
     "servers":
     [
