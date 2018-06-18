@@ -610,7 +610,7 @@ bool Receivepacket()
 
         printf(
             "[rxpk] "
-            "tmst: %lu, "
+            "tmst: %u, "
             "g_freq: %lf, "
             "chan: 0, rfch: 0, stat: 1, "
             "modu LORA datr: SF%hhuBW%hu, "
@@ -787,11 +787,11 @@ void LoadConfiguration(string configurationFile)
       if (sx127x_conf.IsObject()) {
         for (Value::ConstMemberIterator confIt = sx127x_conf.MemberBegin(); confIt != sx127x_conf.MemberEnd(); ++confIt) {
           string key(confIt->name.GetString());
-          if (key.compare("g_freq") == 0) {
+          if (key.compare("freq") == 0) {
             g_freq = confIt->value.GetUint();
           } else if (key.compare("spread_factor") == 0) {
             g_sf = (SpreadingFactor_t)confIt->value.GetUint();
-          } else if (key.compare("g_sync_word") == 0) {
+          } else if (key.compare("sync_word") == 0) {
             g_sync_word = (uint8_t)(0xffU & confIt->value.GetUint());
           } else if (key.compare("pin_nss") == 0) {
             g_ssPin = confIt->value.GetUint();
