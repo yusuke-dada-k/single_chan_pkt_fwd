@@ -19,6 +19,7 @@
     "name": "raspiloragw",
     "email": "gachapin.2nd@gmail.com",
     "desc": "Raspi LoRa Single Channel Gateway",
+    "client_id": 1,
 
     "servers":
     [
