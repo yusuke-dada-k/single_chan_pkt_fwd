@@ -1,3 +1,5 @@
+#define ENABLE_DEBUG_PRINT
+
  /******************************************************************************
  *
  * Copyright (c) 2015 Thomas Telkamp
@@ -88,12 +90,12 @@ using namespace rapidjson;
 
 static const int SPI_CHANNEL = 0;
 
-bool sx1272 = true;
+bool g_is_sx1272 = true;
 
-struct sockaddr_in si_other;
-int s;
-int slen = sizeof(si_other);
-struct ifreq ifr;
+int g_socket;
+#if 0 //YSK//
+struct ifreq g_ifr;
+#endif //YSK//
 
 uint32_t cp_nb_rx_rcv;
 uint32_t cp_nb_rx_ok;
@@ -127,32 +129,33 @@ typedef struct Server
 
 // SX1272 - Raspberry connections
 // Put them in global_conf.json
-int ssPin = 0xff;
-int dio0  = 0xff;
-int RST   = 0xff;
-int Led1  = 0xff;
-int Led2  = 0xff;      /* life led */
+int g_ssPin    = 0xff;
+int g_dio0Pin  = 0xff;
+int g_resetPin = 0xff;
+int g_led1Pin  = 0xff;
+int g_led2Pin  = 0xff;      /* life led */
 
 // Set location in global_conf.json
-float lat =  0.0;
-float lon =  0.0;
-int   alt =  0;
+float g_lat =  0.0;
+float g_lon =  0.0;
+int   g_alt =  0;
 
 /* Informal status fields */
-char platform[24] ;    /* platform definition */
-char email[40] ;       /* used for contact email */
-char description[64] ; /* used for free form description */
+char g_platform[24] ;       /* platform definition */
+char g_email[40] ;          /* used for contact email */
+char g_client_desc[64] ;    /* used for free form description */
+uint8_t g_client_id;        /* udp client id */
 
 // Set spreading factor (SF7 - SF12), &nd  center frequency
 // Overwritten by the ones set in global_conf.json
-SpreadingFactor_t sf = SF7;
-uint16_t bw = 125;
-uint32_t freq = 868100000; // in Mhz! (868.1)
-uint8_t sync_word = 0x34;  // public LoRaWAN as default
+SpreadingFactor_t g_sf = SF7;
+uint16_t g_bw = 125;
+uint32_t g_freq = 868100000; // in Mhz! (868.1)
+uint8_t g_sync_word = 0x34;  // public LoRaWAN as default
 
 
 // Servers
-vector<Server_t> servers;
+vector<Server_t> g_servers;
 
 // #############################################
 // #############################################
@@ -216,28 +219,32 @@ vector<Server_t> servers;
 #define FRF_MID                  0x06
 #define FRF_LSB                  0x66
 
-#define BUFLEN 2048  //Max length of buffer
+#define PROTOCOL_VERSION  0x12
+#define PKT_PUSH_DATA     0
+//YSK// #define PKT_PUSH_ACK  1
+//YSK// #define PKT_PULL_DATA 2
+//YSK// #define PKT_PULL_RESP 3
+//YSK// #define PKT_PULL_ACK  4
 
-#define PROTOCOL_VERSION  1
-#define PKT_PUSH_DATA 0
-#define PKT_PUSH_ACK  1
-#define PKT_PULL_DATA 2
+//YSK// #define BUFLEN 2048  //Max length of buffer
+//YSK// #define TX_BUFF_SIZE    2048
+//YSK// #define STATUS_SIZE     1024
 
-#define PKT_PULL_RESP 3
-#define PKT_PULL_ACK  4
+#define MAX_SMARTHIVE_PAYLOAD_SIZE 127
+#define SMARTHIVE_PAYLOAD_SIZE_MASK 0x7fU
+#define BUFSIZE 256
 
-#define TX_BUFF_SIZE    2048
-#define STATUS_SIZE     1024
+
 
 void LoadConfiguration(string filename);
 void PrintConfiguration();
 
 //Flag for Ctrl-C
-volatile sig_atomic_t force_exit = 0;
+volatile sig_atomic_t g_force_exit = 0;
 
 void sig_handler(int sig)
 {
-  force_exit=true;
+  g_force_exit=true;
 }
 
 void Die(const char *s)
@@ -248,12 +255,12 @@ void Die(const char *s)
 
 void SelectReceiver()
 {
-  digitalWrite(ssPin, LOW);
+  digitalWrite(g_ssPin, LOW);
 }
 
 void UnselectReceiver()
 {
-  digitalWrite(ssPin, HIGH);
+  digitalWrite(g_ssPin, HIGH);
 }
 
 uint8_t ReadRegister(uint8_t addr)
@@ -280,7 +287,7 @@ void WriteRegister(uint8_t addr, uint8_t value)
   UnselectReceiver();
 }
 
-bool ReceivePkt(char* payload, uint8_t* p_length)
+bool ReceivePkt(uint8_t *payload, uint8_t* p_length)
 {
   // clear rxDone
   WriteRegister(REG_IRQ_FLAGS, 0x40);
@@ -325,21 +332,21 @@ void SetupLoRa()
   char buff[16];
 
   printf("Trying to detect module with ");
-  printf("NSS=%s "  , PinName(ssPin, buff));
-  printf("DIO0=%s " , PinName(dio0 , buff));
-  printf("Reset=%s ", PinName(RST  , buff));
-  printf("Led1=%s ",  PinName(Led1 , buff));
-  printf("Led2=%s ", PinName(Led2 , buff));
-  printf("SyncWord=0x%02X\n", sync_word);
-  
-  // check basic 
-  if (ssPin == 0xff || dio0 == 0xff) {
+  printf("NSS=%s "  , PinName(g_ssPin, buff));
+  printf("DIO0=%s " , PinName(g_dio0Pin, buff));
+  printf("Reset=%s ", PinName(g_resetPin, buff));
+  printf("Led1=%s ",  PinName(g_led1Pin, buff));
+  printf("Led2=%s ",  PinName(g_led2Pin, buff));
+  printf("SyncWord=0x%02X\n", g_sync_word);
+
+  // check basic
+  if (g_ssPin == 0xff || g_dio0Pin == 0xff) {
     Die("Bad pin configuration ssPin and dio0 need at least to be defined");
   }
 
-  digitalWrite(RST, HIGH);
+  digitalWrite(g_resetPin, HIGH);
   delay(100);
-  digitalWrite(RST, LOW);
+  digitalWrite(g_resetPin, LOW);
   delay(100);
 
   uint8_t version = ReadRegister(REG_VERSION);
@@ -347,18 +354,18 @@ void SetupLoRa()
   if (version == 0x22) {
     // sx1272
     printf("SX1272 detected, starting.\n");
-    sx1272 = true;
+    g_is_sx1272 = true;
   } else {
     // sx1276?
-    digitalWrite(RST, LOW);
+    digitalWrite(g_resetPin, LOW);
     delay(100);
-    digitalWrite(RST, HIGH);
+    digitalWrite(g_resetPin, HIGH);
     delay(100);
     version = ReadRegister(REG_VERSION);
     if (version == 0x12) {
       // sx1276
       printf("SX1276 detected, starting.\n");
-      sx1272 = false;
+      g_is_sx1272 = false;
     } else {
       printf("Transceiver version 0x%02X\n", version);
       Die("Unrecognized transceiver");
@@ -368,32 +375,32 @@ void SetupLoRa()
   WriteRegister(REG_OPMODE, SX72_MODE_SLEEP);
 
   // set frequency
-  uint64_t frf = ((uint64_t)freq << 19) / 32000000;
+  uint64_t frf = ((uint64_t)g_freq << 19) / 32000000;
   WriteRegister(REG_FRF_MSB, (uint8_t)(frf >> 16) );
   WriteRegister(REG_FRF_MID, (uint8_t)(frf >> 8) );
   WriteRegister(REG_FRF_LSB, (uint8_t)(frf >> 0) );
 
   // set sync word (18=0x12:private LoRa, 52=0x34:public LoRaWAN)
-  WriteRegister(REG_SYNC_WORD, sync_word);
+  WriteRegister(REG_SYNC_WORD, g_sync_word);
 
-  if (sx1272) {
-    if (sf == SF11 || sf == SF12) {
+  if (g_is_sx1272) {
+    if (g_sf == SF11 || g_sf == SF12) {
       WriteRegister(REG_MODEM_CONFIG, 0x0B);
     } else {
       WriteRegister(REG_MODEM_CONFIG, 0x0A);
     }
-    WriteRegister(REG_MODEM_CONFIG2, (sf << 4) | 0x04);
+    WriteRegister(REG_MODEM_CONFIG2, (g_sf << 4) | 0x04);
   } else {
-    if (sf == SF11 || sf == SF12) {
+    if (g_sf == SF11 || g_sf == SF12) {
       WriteRegister(REG_MODEM_CONFIG3, 0x0C);
     } else {
       WriteRegister(REG_MODEM_CONFIG3, 0x04);
     }
     WriteRegister(REG_MODEM_CONFIG, 0x72);
-    WriteRegister(REG_MODEM_CONFIG2, (sf << 4) | 0x04);
+    WriteRegister(REG_MODEM_CONFIG2, (g_sf << 4) | 0x04);
   }
 
-  if (sf == SF10 || sf == SF11 || sf == SF12) {
+  if (g_sf == SF10 || g_sf == SF11 || g_sf == SF12) {
     WriteRegister(REG_SYMB_TIMEOUT_LSB, 0x05);
   } else {
     WriteRegister(REG_SYMB_TIMEOUT_LSB, 0x08);
@@ -438,22 +445,24 @@ void SolveHostname(const char* p_hostname, uint16_t port, struct sockaddr_in* p_
   freeaddrinfo(p_result);
 }
 
-void SendUdp(char *msg, int length)
+void SendUdp(uint8_t *msg, size_t length)
 {
-  for (vector<Server_t>::iterator it = servers.begin(); it != servers.end(); ++it) {
-    if (it->enabled) {
-      si_other.sin_port = htons(it->port);
+    struct sockaddr_in sa = { .sin_family = AF_INET };
 
-      SolveHostname(it->address.c_str(), it->port, &si_other);
-      if (sendto(s, (char *)msg, length, 0 , (struct sockaddr *) &si_other, slen)==-1) {
-        Die("sendto()");
-      }
+    for (vector<Server_t>::iterator it = g_servers.begin(); it != g_servers.end(); ++it) {
+        if (it->enabled) {
+            sa.sin_port = htons(it->port);
+            SolveHostname(it->address.c_str(), it->port, &sa);
+            if (sendto(g_socket, msg, length, 0 , (struct sockaddr *) &sa, sizeof(sa))==-1) {
+                perror("sendto");
+            }
+        }
     }
-  }
 }
 
 void SendStat()
 {
+#if 0 //YSK//
   static char status_report[STATUS_SIZE]; /* status report as a JSON object */
   char stat_timestamp[24];
 
@@ -463,14 +472,14 @@ void SendStat()
   status_report[0] = PROTOCOL_VERSION;
   status_report[3] = PKT_PUSH_DATA;
 
-  status_report[4] = (unsigned char)ifr.ifr_hwaddr.sa_data[0];
-  status_report[5] = (unsigned char)ifr.ifr_hwaddr.sa_data[1];
-  status_report[6] = (unsigned char)ifr.ifr_hwaddr.sa_data[2];
+  status_report[4] = (unsigned char)g_ifr.ifr_hwaddr.sa_data[0];
+  status_report[5] = (unsigned char)g_ifr.ifr_hwaddr.sa_data[1];
+  status_report[6] = (unsigned char)g_ifr.ifr_hwaddr.sa_data[2];
   status_report[7] = 0xFF;
   status_report[8] = 0xFF;
-  status_report[9] = (unsigned char)ifr.ifr_hwaddr.sa_data[3];
-  status_report[10] = (unsigned char)ifr.ifr_hwaddr.sa_data[4];
-  status_report[11] = (unsigned char)ifr.ifr_hwaddr.sa_data[5];
+  status_report[9] = (unsigned char)g_ifr.ifr_hwaddr.sa_data[3];
+  status_report[10] = (unsigned char)g_ifr.ifr_hwaddr.sa_data[4];
+  status_report[11] = (unsigned char)g_ifr.ifr_hwaddr.sa_data[5];
 
   /* start composing datagram with the header */
   uint8_t token_h = (uint8_t)rand(); /* random token */
@@ -492,11 +501,11 @@ void SendStat()
   writer.String("time");
   writer.String(stat_timestamp);
   writer.String("lati");
-  writer.Double(lat);
+  writer.Double(g_lat);
   writer.String("long");
-  writer.Double(lon);
+  writer.Double(g_lon);
   writer.String("alti");
-  writer.Int(alt);
+  writer.Int(g_alt);
   writer.String("rxnb");
   writer.Uint(cp_nb_rx_rcv);
   writer.String("rxok");
@@ -510,11 +519,11 @@ void SendStat()
   writer.String("txnb");
   writer.Uint(0);
   writer.String("pfrm");
-  writer.String(platform);
+  writer.String(g_platform);
   writer.String("mail");
-  writer.String(email);
+  writer.String(g_email);
   writer.String("desc");
-  writer.String(description);
+  writer.String(g_client_desc);
   writer.EndObject();
   writer.EndObject();
 
@@ -530,133 +539,104 @@ void SendStat()
   // Build and send message.
   memcpy(status_report + 12, json.c_str(), json.size());
   SendUdp(status_report, stat_index + json.size());
+#endif //YSK//
 }
 
 bool Receivepacket()
 {
-  long int SNR;
-  int rssicorr;
-  bool ret = false;
+    static uint8_t udp_buf[BUFSIZE];
+    static uint8_t lora_buf[BUFSIZE];
 
-  if (digitalRead(dio0) == 1) {
-    char message[256];
-    uint8_t length = 0;
-    if (ReceivePkt(message, &length)) {
-      // OK got one
-      ret = true;
+    uint8_t len = 0;
+    uint8_t lora_len = 0;
 
-      uint8_t value = ReadRegister(REG_PKT_SNR_VALUE);
-      if (value & 0x80) { // The SNR sign bit is 1
-        // Invert and divide by 4
-        value = ((~value + 1) & 0xFF) >> 2;
-        SNR = -value;
-      } else {
-        // Divide by 4
-        SNR = ( value & 0xFF ) >> 2;
-      }
-
-      rssicorr = sx1272 ? 139 : 157;
-
-      printf("Packet RSSI: %d, ", ReadRegister(0x1A) - rssicorr);
-      printf("RSSI: %d, ", ReadRegister(0x1B) - rssicorr);
-      printf("SNR: %li, ", SNR);
-      printf("Length: %hhu Message:'", length);
-      for (int i=0; i<length; i++) {
-        char c = (char) message[i];
-        printf("%c",isprint(c)?c:'.');
-      }
-      printf("'\n");
-
-      char buff_up[TX_BUFF_SIZE]; /* buffer to compose the upstream packet */
-      int buff_index = 0;
-
-      /* gateway <-> MAC protocol variables */
-      //static uint32_t net_mac_h; /* Most Significant Nibble, network order */
-      //static uint32_t net_mac_l; /* Least Significant Nibble, network order */
-
-      /* pre-fill the data buffer with fixed fields */
-      buff_up[0] = PROTOCOL_VERSION;
-      buff_up[3] = PKT_PUSH_DATA;
-
-      /* process some of the configuration variables */
-      //net_mac_h = htonl((uint32_t)(0xFFFFFFFF & (lgwm>>32)));
-      //net_mac_l = htonl((uint32_t)(0xFFFFFFFF &  lgwm  ));
-      //*(uint32_t *)(buff_up + 4) = net_mac_h; 
-      //*(uint32_t *)(buff_up + 8) = net_mac_l;
-
-      buff_up[4] = (uint8_t)ifr.ifr_hwaddr.sa_data[0];
-      buff_up[5] = (uint8_t)ifr.ifr_hwaddr.sa_data[1];
-      buff_up[6] = (uint8_t)ifr.ifr_hwaddr.sa_data[2]; 
-      buff_up[7] = 0xFF;
-      buff_up[8] = 0xFF;
-      buff_up[9] = (uint8_t)ifr.ifr_hwaddr.sa_data[3];
-      buff_up[10] = (uint8_t)ifr.ifr_hwaddr.sa_data[4];
-      buff_up[11] = (uint8_t)ifr.ifr_hwaddr.sa_data[5];
-
-      /* start composing datagram with the header */
-      uint8_t token_h = (uint8_t)rand(); /* random token */
-      uint8_t token_l = (uint8_t)rand(); /* random token */
-      buff_up[1] = token_h;
-      buff_up[2] = token_l;
-      buff_index = 12; /* 12-byte header */
-
-      // TODO: tmst can jump is time is (re)set, not good.
-      struct timeval now;
-      gettimeofday(&now, NULL);
-      uint32_t tmst = (uint32_t)(now.tv_sec * 1000000 + now.tv_usec);
-
-      // Encode payload.
-      char b64[BASE64_MAX_LENGTH];
-      bin_to_b64((uint8_t*)message, length, b64, BASE64_MAX_LENGTH);
-
-      // Build JSON object.
-      StringBuffer sb;
-      Writer<StringBuffer> writer(sb);
-      writer.StartObject();
-      writer.String("rxpk");
-      writer.StartArray();
-      writer.StartObject();
-      writer.String("tmst");
-      writer.Uint(tmst);
-      writer.String("freq");
-      writer.Double((double)freq / 1000000);
-      writer.String("chan");
-      writer.Uint(0);
-      writer.String("rfch");
-      writer.Uint(0);
-      writer.String("stat");
-      writer.Uint(1);
-      writer.String("modu");
-      writer.String("LORA");
-      writer.String("datr");
-      char datr[] = "SFxxBWxxx";
-      snprintf(datr, strlen(datr) + 1, "SF%hhuBW%hu", sf, bw);
-      writer.String(datr);
-      writer.String("codr");
-      writer.String("4/5");
-      writer.String("rssi");
-      writer.Int(ReadRegister(0x1A) - rssicorr);
-      writer.String("lsnr");
-      writer.Double(SNR); // %li.
-      writer.String("size");
-      writer.Uint(length);
-      writer.String("data");
-      writer.String(b64);
-      writer.EndObject();
-      writer.EndArray();
-      writer.EndObject();
-
-      string json = sb.GetString();
-      printf("rxpk update: %s\n", json.c_str());
-
-      // Build and send message.
-      memcpy(buff_up + 12, json.c_str(), json.size());
-      SendUdp(buff_up, buff_index + json.size());
-
-      fflush(stdout);
+    if (digitalRead(g_dio0Pin) != 1) {
+        return false;
     }
-  }
-  return ret;
+    if (!ReceivePkt(lora_buf, &len) || 0 == len) {
+        return false;
+    }
+    // OK got one
+
+    lora_len = len;
+    lora_len &= SMARTHIVE_PAYLOAD_SIZE_MASK;
+
+    /*
+     * |<----------- A bytes ----------->|
+     * |               |<-- A-4 bytes -->|
+     * +---+---+---+---+-----.......-----+
+     * | A | B | C | D |        E        |
+     * +---+---+---+---+-----.......-----+
+     *
+     *  * A: Protocol version, 1byte
+     *  * B: Length (from A to D), 1byte
+     *  * C: UDP client ID, 1byte
+     *  * D: Packet type, 1byte
+     *  * E: LoRa data, A-4bytes (max 127 bytes)
+     */
+
+    udp_buf[0] = PROTOCOL_VERSION;
+    udp_buf[1] = 4 + lora_len;
+    udp_buf[2] = g_client_id;
+    udp_buf[3] = PKT_PUSH_DATA;
+    memcpy(&udp_buf[4], lora_buf, lora_len);
+
+    SendUdp(udp_buf, udp_buf[1]);
+
+#if defined(ENABLE_DEBUG_PRINT)
+    {
+        struct timeval now;
+        uint8_t v8_tmp = 0;
+
+        uint32_t tmst = 0;
+        long int snr = 0;
+        int rssicorr = 0;
+
+        // TODO: tmst can jump is time is (re)set, not good.
+        gettimeofday(&now, NULL);
+        tmst = (uint32_t)(now.tv_sec * 1000000 + now.tv_usec);
+
+        v8_tmp = ReadRegister(REG_PKT_SNR_VALUE);
+        if (v8_tmp & 0x80) { // The snr sign bit is 1
+            // Invert and divide by 4
+            v8_tmp = ((~v8_tmp + 1) & 0xFF) >> 2;
+            snr = -v8_tmp;
+        } else {
+            // Divide by 4
+            snr = ( v8_tmp & 0xFF ) >> 2;
+        }
+
+        rssicorr = g_is_sx1272 ? 139 : 157;
+
+        printf(
+            "[rxpk] "
+            "tmst: %lu, "
+            "g_freq: %lf, "
+            "chan: 0, rfch: 0, stat: 1, "
+            "modu LORA datr: SF%hhuBW%hu, "
+            "codr: 4/5\n"
+            "Packet RSSI: %d, "
+            "RSSI: %d, "
+            "LSNR: %li, "
+            "Length: %hhu, Buf:'"
+            , tmst
+            , (double)g_freq / 1000000
+            , g_sf, g_bw
+            , ReadRegister(0x1A) - rssicorr
+            , ReadRegister(0x1B) - rssicorr
+            , snr
+            , len
+            );
+        for (int i=0; i<len; i++) {
+            printf(" %02x", lora_buf[i]);
+        }
+        printf("'\n");
+    }
+    fflush(stdout);
+
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+
+  return true;
 }
 
 int main()
@@ -673,9 +653,9 @@ int main()
 
   // Init WiringPI
   wiringPiSetup() ;
-  pinMode(ssPin, OUTPUT);
-  pinMode(dio0, INPUT);
-  pinMode(RST, OUTPUT);
+  pinMode(g_ssPin, OUTPUT);
+  pinMode(g_dio0Pin, INPUT);
+  pinMode(g_resetPin, OUTPUT);
 
   // Init SPI
   wiringPiSPISetup(SPI_CHANNEL, 500000);
@@ -684,54 +664,57 @@ int main()
   SetupLoRa();
 
   // LED ?
-  if (Led1 != 0xff) {
-    pinMode(Led1, OUTPUT);
+  if (g_led1Pin != 0xff) {
+    pinMode(g_led1Pin, OUTPUT);
 
     // Blink to indicate startup
     for (uint8_t i=0; i<5 ; i++) {
-      digitalWrite(Led1, 1);
+      digitalWrite(g_led1Pin, 1);
       delay(50);
-      digitalWrite(Led1, 0);
+      digitalWrite(g_led1Pin, 0);
       delay(50);
     }
   }
-  if (Led2 != 0xff) {
-    pinMode(Led2, OUTPUT);
-    digitalWrite(Led2, 1);
+  if (g_led2Pin != 0xff) {
+    pinMode(g_led2Pin, OUTPUT);
+    digitalWrite(g_led2Pin, 1);
   }
 
   // Prepare Socket connection
-  if ((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+  if ((g_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
     Die("socket");
   }
 
-  memset((char *) &si_other, 0, sizeof(si_other));
-  si_other.sin_family = AF_INET;
-
-  ifr.ifr_addr.sa_family = AF_INET;
-  strncpy(ifr.ifr_name, "eth0", IFNAMSIZ-1);  // can we rely on eth0?
-  ioctl(s, SIOCGIFHWADDR, &ifr);
+#if 0 //YSK//
+  g_ifr.ifr_addr.sa_family = AF_INET;
+  strncpy(g_ifr.ifr_name, "eth0", IFNAMSIZ-1);  // can we rely on eth0?
+  ioctl(g_socket, SIOCGIFHWADDR, &g_ifr);
 
   // ID based on MAC Adddress of eth0
   printf( "Gateway ID: %.2x:%.2x:%.2x:ff:ff:%.2x:%.2x:%.2x\n",
-              (uint8_t)ifr.ifr_hwaddr.sa_data[0],
-              (uint8_t)ifr.ifr_hwaddr.sa_data[1],
-              (uint8_t)ifr.ifr_hwaddr.sa_data[2],
-              (uint8_t)ifr.ifr_hwaddr.sa_data[3],
-              (uint8_t)ifr.ifr_hwaddr.sa_data[4],
-              (uint8_t)ifr.ifr_hwaddr.sa_data[5]
+              (uint8_t)g_ifr.ifr_hwaddr.sa_data[0],
+              (uint8_t)g_ifr.ifr_hwaddr.sa_data[1],
+              (uint8_t)g_ifr.ifr_hwaddr.sa_data[2],
+              (uint8_t)g_ifr.ifr_hwaddr.sa_data[3],
+              (uint8_t)g_ifr.ifr_hwaddr.sa_data[4],
+              (uint8_t)g_ifr.ifr_hwaddr.sa_data[5]
   );
+#endif //YSK//
 
-  printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
+  printf("Listening at SF%i on %.6lf Mhz.\n", g_sf,(double)g_freq/1000000);
   printf("-----------------------------------\n");
 
-  while (!force_exit) {
+  while (!g_force_exit) {
+
+    /* TODO: use WiringPi ISR for gpio
+     * http://wiringpi.com/reference/priority-interrupts-and-threads/
+     */
 
     // Packet received ?
     if (Receivepacket()) {
       // Led ON
-      if (Led1 != 0xff) {
-        digitalWrite(Led1, 1);
+      if (g_led1Pin != 0xff) {
+        digitalWrite(g_led1Pin, 1);
       }
 
       // start our Led blink timer, LED as been lit in Receivepacket
@@ -756,8 +739,8 @@ int main()
         led1_timer = 0;
 
         // Led OFF
-        if (Led1 != 0xff) {
-          digitalWrite(Led1, 0);
+        if (g_led1Pin != 0xff) {
+          digitalWrite(g_led1Pin, 0);
         }
       }
     }
@@ -768,11 +751,11 @@ int main()
   printf("\nBreak received, exiting!\n");
 
   // All module LEDs off
-  if (Led1 != 0xff) {
-    digitalWrite(Led1, 0);
+  if (g_led1Pin != 0xff) {
+    digitalWrite(g_led1Pin, 0);
   }
-  if (Led2 != 0xff) {
-    digitalWrite(Led2, 0);
+  if (g_led2Pin != 0xff) {
+    digitalWrite(g_led2Pin, 0);
   }
 
 
@@ -782,7 +765,7 @@ int main()
   delay(150);
 
   // Reset
-  digitalWrite(RST, LOW);
+  digitalWrite(g_resetPin, LOW);
   delay(150);
 
   return (0);
@@ -804,22 +787,22 @@ void LoadConfiguration(string configurationFile)
       if (sx127x_conf.IsObject()) {
         for (Value::ConstMemberIterator confIt = sx127x_conf.MemberBegin(); confIt != sx127x_conf.MemberEnd(); ++confIt) {
           string key(confIt->name.GetString());
-          if (key.compare("freq") == 0) {
-            freq = confIt->value.GetUint();
+          if (key.compare("g_freq") == 0) {
+            g_freq = confIt->value.GetUint();
           } else if (key.compare("spread_factor") == 0) {
-            sf = (SpreadingFactor_t)confIt->value.GetUint();
-          } else if (key.compare("sync_word") == 0) {
-            sync_word = (uint8_t)(0xffU & confIt->value.GetUint());
+            g_sf = (SpreadingFactor_t)confIt->value.GetUint();
+          } else if (key.compare("g_sync_word") == 0) {
+            g_sync_word = (uint8_t)(0xffU & confIt->value.GetUint());
           } else if (key.compare("pin_nss") == 0) {
-            ssPin = confIt->value.GetUint();
+            g_ssPin = confIt->value.GetUint();
           } else if (key.compare("pin_dio0") == 0) {
-            dio0 = confIt->value.GetUint();
+            g_dio0Pin = confIt->value.GetUint();
           } else if (key.compare("pin_rst") == 0) {
-            RST = confIt->value.GetUint();
+            g_resetPin = confIt->value.GetUint();
           } else if (key.compare("pin_led1") == 0) {
-            Led1 = confIt->value.GetUint();
+            g_led1Pin = confIt->value.GetUint();
           } else if (key.compare("pin_led2") == 0) {
-            Led2 = confIt->value.GetUint();
+            g_led2Pin = confIt->value.GetUint();
           }
         }
       }
@@ -830,22 +813,23 @@ void LoadConfiguration(string configurationFile)
         for (Value::ConstMemberIterator confIt = gateway_conf.MemberBegin(); confIt != gateway_conf.MemberEnd(); ++confIt) {
           string memberType(confIt->name.GetString());
           if (memberType.compare("ref_latitude") == 0) {
-            lat = confIt->value.GetDouble();
+            g_lat = confIt->value.GetDouble();
           } else if (memberType.compare("ref_longitude") == 0) {
-            lon = confIt->value.GetDouble();
+            g_lon = confIt->value.GetDouble();
           } else if (memberType.compare("ref_altitude") == 0) {
-            alt = confIt->value.GetUint(); 
+            g_alt = confIt->value.GetUint();
 
           } else if (memberType.compare("name") == 0 && confIt->value.IsString()) {
             string str = confIt->value.GetString();
-            strcpy(platform, str.length()<=24 ? str.c_str() : "name too long");
+            strcpy(g_platform, str.length()<=24 ? str.c_str() : "name too long");
           } else if (memberType.compare("email") == 0 && confIt->value.IsString()) {
             string str = confIt->value.GetString();
-            strcpy(email, str.length()<=40 ? str.c_str() : "email too long");
+            strcpy(g_email, str.length()<=40 ? str.c_str() : "email too long");
           } else if (memberType.compare("desc") == 0 && confIt->value.IsString()) {
             string str = confIt->value.GetString();
-            strcpy(description, str.length()<=64 ? str.c_str() : "description is too long");
-
+            strcpy(g_client_desc, str.length()<=64 ? str.c_str() : "description is too long");
+          } else if (memberType.compare("client_id") == 0 && confIt->value.IsUint()) {
+            g_client_id = 0xffU & confIt->value.GetUint();
           } else if (memberType.compare("servers") == 0) {
             const Value& serverConf = confIt->value;
             if (serverConf.IsObject()) {
@@ -861,7 +845,7 @@ void LoadConfiguration(string configurationFile)
                   server.enabled = srvIt->value.GetBool();
                 }
               }
-              servers.push_back(server);
+              g_servers.push_back(server);
             }
             else if (serverConf.IsArray()) {
               for (SizeType i = 0; i < serverConf.Size(); i++) {
@@ -877,7 +861,7 @@ void LoadConfiguration(string configurationFile)
                     server.enabled = srvIt->value.GetBool();
                   }
                 }
-                servers.push_back(server);
+                g_servers.push_back(server);
               }
             }
           }
@@ -889,11 +873,15 @@ void LoadConfiguration(string configurationFile)
 
 void PrintConfiguration()
 {
-  for (vector<Server_t>::iterator it = servers.begin(); it != servers.end(); ++it) {
+  for (vector<Server_t>::iterator it = g_servers.begin(); it != g_servers.end(); ++it) {
     printf("server: .address = %s; .port = %hu; .enable = %d\n", it->address.c_str(), it->port, it->enabled);
   }
   printf("Gateway Configuration\n");
-  printf("  %s (%s)\n  %s\n", platform, email, description);
-  printf("  Latitude=%.8f\n  Longitude=%.8f\n  Altitude=%d\n", lat,lon,alt);
+  printf("  %s (%s)\n  %s\n", g_platform, g_email, g_client_desc);
+  printf("  Latitude=%.8f\n  Longitude=%.8f\n  Altitude=%d\n", g_lat,g_lon,g_alt);
 
 }
+
+
+
+/* vim: set ts=4 sts=4 sw=4 expandtab autoindent : */
