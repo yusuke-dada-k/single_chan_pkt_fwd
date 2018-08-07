@@ -562,19 +562,20 @@ bool Receivepacket()
     lora_len &= SMARTHIVE_PAYLOAD_SIZE_MASK;
 
     /*
-     * |<----------- A bytes ----------->|
-     * |               |<-- A-4 bytes -->|
-     * +---+---+---+---+-----.......-----+
-     * | A | B | C | D |        E        |
-     * +---+---+---+---+-----.......-----+
+     * UDP packet format:
      *
-     *  * A: Protocol version, 1byte
-     *  * B: Length (from A to D), 1byte
-     *  * C: UDP client ID, 1byte
-     *  * D: Packet type, 1byte
-     *  * E: LoRa data, A-4bytes (max 127 bytes)
+     *  |<----------- B bytes ----------->|
+     *  |               |<-- B-4 bytes -->|
+     *  +---+---+---+---+-----.......-----+
+     *  | A | B | C | D |        E        |
+     *  +---+---+---+---+-----.......-----+
+     *
+     *      * A (1 byte) : Protocol version
+     *      * B (1 byte) : Length (from A to E)
+     *      * C (1 byte) : UDP client ID
+     *      * D (1 byte) : Packet type
+     *      * E (B-4 bytes) : LoRa data (max 127 bytes)
      */
-
     udp_buf[0] = PROTOCOL_VERSION;
     udp_buf[1] = 4 + lora_len;
     udp_buf[2] = g_client_id;
