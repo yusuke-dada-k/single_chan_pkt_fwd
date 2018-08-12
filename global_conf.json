@@ -25,7 +25,7 @@
     [
       {
         "address": "127.0.0.1",
-        "port": 1700,
+        "port": 50812,
         "enabled": false
       }
     ]
