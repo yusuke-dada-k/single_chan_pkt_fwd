@@ -1,5 +1,8 @@
 #define ENABLE_DEBUG_PRINT
 
+/* Enable quirk for LoRa driver adding waste 4 bytes at head */
+#define QUIRK_LORA_PACKET_SIZE
+
  /******************************************************************************
  *
  * Copyright (c) 2015 Thomas Telkamp
@@ -553,12 +556,20 @@ bool Receivepacket()
     if (digitalRead(g_dio0Pin) != 1) {
         return false;
     }
+#if defined(QUIRK_LORA_PACKET_SIZE)
+    if (!ReceivePkt(lora_buf, &len) || len < 4) {
+#else /* defined(QUIRK_LORA_PACKET_SIZE) */
     if (!ReceivePkt(lora_buf, &len) || 0 == len) {
+#endif /* defined(QUIRK_LORA_PACKET_SIZE) */
         return false;
     }
     // OK got one
 
+#if defined(QUIRK_LORA_PACKET_SIZE)
+    lora_len = len - 4;
+#else /* defined(QUIRK_LORA_PACKET_SIZE) */
     lora_len = len;
+#endif /* defined(QUIRK_LORA_PACKET_SIZE) */
     lora_len &= SMARTHIVE_PAYLOAD_SIZE_MASK;
 
     /*
@@ -579,8 +590,16 @@ bool Receivepacket()
     udp_buf[1] = 4 + lora_len;
     udp_buf[2] = g_client_id;
     udp_buf[3] = PKT_PUSH_DATA;
+#if defined(QUIRK_LORA_PACKET_SIZE)
+    memcpy(&udp_buf[4], lora_buf + 4, lora_len);
+#else /* defined(QUIRK_LORA_PACKET_SIZE) */
     memcpy(&udp_buf[4], lora_buf, lora_len);
+#endif /* defined(QUIRK_LORA_PACKET_SIZE) */
 
+#if defined(ENABLE_DEBUG_PRINT)
+    printf("Send UDP, header: %02x %02x %02x %02x\n",
+            udp_buf[0], udp_buf[1], udp_buf[2], udp_buf[3]);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
     SendUdp(udp_buf, udp_buf[1]);
 
 #if defined(ENABLE_DEBUG_PRINT)
