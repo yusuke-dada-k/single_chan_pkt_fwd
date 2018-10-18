@@ -1,4 +1,5 @@
-#define ENABLE_DEBUG_PRINT
+/* Enable debug print */
+// #define ENABLE_DEBUG_PRINT
 
 /* Enable quirk for LoRa driver adding waste 4 bytes at head */
 #define QUIRK_LORA_PACKET_SIZE
