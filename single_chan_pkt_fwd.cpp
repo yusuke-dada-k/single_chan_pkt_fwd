@@ -1,6 +1,10 @@
 /* Enable debug print */
 // #define ENABLE_DEBUG_PRINT
 
+/* Enable ISR to get DIO0 signal, we need as root */
+#define ENABLE_DIO0_ISR
+#define DIO0_ISR_TIMEOUT_MS (1000)  /* wait timeout in milli-sec */
+
 /* Enable quirk for LoRa driver adding waste 4 bytes at head */
 #define QUIRK_LORA_PACKET_SIZE
 
@@ -138,6 +142,10 @@ int g_dio0Pin  = 0xff;
 int g_resetPin = 0xff;
 int g_led1Pin  = 0xff;
 int g_led2Pin  = 0xff;      /* life led */
+
+#if defined(ENABLE_DIO0_ISR)
+static char g_dio0Path[256];
+#endif /* defined(ENABLE_DIO0_ISR) */
 
 // Set location in global_conf.json
 float g_lat =  0.0;
@@ -417,6 +425,75 @@ void SetupLoRa()
   // Set Continous Receive Mode
   WriteRegister(REG_LNA, LNA_MAX_GAIN);  // max lna gain
   WriteRegister(REG_OPMODE, SX72_MODE_RX_CONTINUOS);
+
+#if defined(ENABLE_DIO0_ISR)
+  /*
+   * https://www.kernel.org/doc/Documentation/gpio/sysfs.txt
+   */
+  do {
+    int brcmDio0Pin = wpiPinToGpio(g_dio0Pin);
+    FILE *pFileExport = NULL;
+    FILE *pFileDirection = NULL;
+    FILE *pFileEdge = NULL;
+    char path[256];
+
+#if defined(ENABLE_DEBUG_PRINT)
+    printf("Dio0 brcm pin#: %d\n", brcmDio0Pin);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+
+    /* export DIO0 */
+    snprintf(g_dio0Path, sizeof(g_dio0Path),
+        "/sys/class/gpio/gpio%d", brcmDio0Pin);
+    g_dio0Path[sizeof(g_dio0Path) - 1] = '\0';
+
+    pFileExport = fopen("/sys/class/gpio/export", "r+b");
+    if (!pFileExport)
+#if defined(ENABLE_DEBUG_PRINT)
+      printf("Failed to open /sys/class/gpio/export.\n");
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+      break;
+    }
+    fprintf(pFileExport, "%d\n", brcmDio0Pin);
+    fclose(pFileExport); pFileExport = 0;
+#if defined(ENABLE_DEBUG_PRINT)
+    printf("Wrote '%d' into /sys/class/gpio/export.\n", brcmDio0Pin0);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+
+    /* set DIO0 to input */
+    snprintf(path, sizeof(path), "%s/direction", g_dio0Path);
+    path[sizeof(path) - 1] = '\0';
+
+    pFileDirection = fopen(path, "r+b");
+    if (!pFileDirection) {
+#if defined(ENABLE_DEBUG_PRINT)
+      printf("Failed to open %s.\n", path);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+      break;
+    }
+    fprintf(pFileDirection, "in\n");
+    fclose(pFileDirection); pFileDirection = NULL;
+#if defined(ENABLE_DEBUG_PRINT)
+    printf("Wrote 'in' into %s.\n", path);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+
+    /* set DIO0 interrupt to getting rising-edge */
+    snprintf(path, sizeof(path), "%s/edge", g_dio0Path);
+    path[sizeof(path) - 1] = '\0';
+
+    pFileEdge = fopen(path, "r+b");
+    if (!pFileEdge) {
+#if defined(ENABLE_DEBUG_PRINT)
+      printf("Failed to open %s.\n", path);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+      break;
+    }
+    fprintf(pFileEdge, "rising\n");
+    fclose(pFileEdge); pFileEdge = NULL;
+#if defined(ENABLE_DEBUG_PRINT)
+    printf("Wrote 'rising' into %s.\n", path);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+  } while (0);
+#endif /* defined(ENABLE_DIO0_ISR) */
 }
 
 void SolveHostname(const char* p_hostname, uint16_t port, struct sockaddr_in* p_sin)
@@ -546,6 +623,53 @@ void SendStat()
 #endif //YSK//
 }
 
+#if defined(ENABLE_DIO0_ISR)
+static bool WaitForDio0_(void)
+{
+  int fd = -1;
+  int ret = 0;
+  struct pollfd fds = { 0 };
+
+  fd = open(g_dio0Path, O_RDONLY);
+  if (fd < 0) {
+#if defined(ENABLE_DEBUG_PRINT)
+    printf("Failed to open %s.\n", g_dio0Path);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+    return false;
+  }
+
+  /* dummy read */
+  {
+    int nr;
+    if (!ioctl(fd, FIONREAD, &nr)) {
+      int i;
+      char c;
+#if defined(ENABLE_DEBUG_PRINT)
+      printf("Need dummy read %d bytes.\n", nr);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+      for (i = 0 ; i < nr ; ++i) {
+        read(fd, &c, sizeof(c));
+      }
+    }
+  }
+
+  /* polling gpio */
+  fds.events = (POLLPRI | POLLERR) ;
+  fds.revents = 0;
+  fds.fd = fd;
+
+  ret = poll(&fds, 1, DIO0_ISR_TIMEOUT_MS);
+  close(fd), fd = -1;
+
+#if defined(ENABLE_DEBUG_PRINT)
+  printf("Polling %s returns %d.\n", g_dio0Path, ret);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+  return 1 == ret ? true : false;
+}
+#else /* defined(ENABLE_DIO0_ISR) */
+# define WaitForDio0_() {}
+#endif /* defined(ENABLE_DIO0_ISR) */
+
 bool Receivepacket()
 {
     static uint8_t udp_buf[BUFSIZE];
@@ -553,6 +677,8 @@ bool Receivepacket()
 
     uint8_t len = 0;
     uint8_t lora_len = 0;
+
+    WaitForDio0_();
 
     if (digitalRead(g_dio0Pin) != 1) {
         return false;
@@ -725,10 +851,6 @@ int main()
   printf("-----------------------------------\n");
 
   while (!g_force_exit) {
-
-    /* TODO: use WiringPi ISR for gpio
-     * http://wiringpi.com/reference/priority-interrupts-and-threads/
-     */
 
     // Packet received ?
     if (Receivepacket()) {
