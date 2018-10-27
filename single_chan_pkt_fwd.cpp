@@ -3,7 +3,7 @@
 
 /* Enable ISR to get DIO0 signal, we need as root */
 #define ENABLE_DIO0_ISR
-#define DIO0_ISR_TIMEOUT_MS (1000)  /* wait timeout in milli-sec */
+#define DIO0_ISR_TIMEOUT_MS (15000)     /* wait timeout in milli-sec */
 
 /* Enable quirk for LoRa driver adding waste 4 bytes at head */
 #define QUIRK_LORA_PACKET_SIZE
@@ -82,6 +82,12 @@
 #include <netdb.h>
 #include <signal.h>
 
+#if defined(ENABLE_DIO0_ISR)
+#include <unistd.h>
+#include <fcntl.h>
+#include <poll.h>
+#endif /* defined(ENABLE_DIO0_ISR) */
+
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
@@ -144,7 +150,7 @@ int g_led1Pin  = 0xff;
 int g_led2Pin  = 0xff;      /* life led */
 
 #if defined(ENABLE_DIO0_ISR)
-static char g_dio0Path[256];
+static char g_dio0ValuePath[256];
 #endif /* defined(ENABLE_DIO0_ISR) */
 
 // Set location in global_conf.json
@@ -435,6 +441,7 @@ void SetupLoRa()
     FILE *pFileExport = NULL;
     FILE *pFileDirection = NULL;
     FILE *pFileEdge = NULL;
+    char dio0Path[256];
     char path[256];
 
 #if defined(ENABLE_DEBUG_PRINT)
@@ -442,12 +449,14 @@ void SetupLoRa()
 #endif /* defined(ENABLE_DEBUG_PRINT) */
 
     /* export DIO0 */
-    snprintf(g_dio0Path, sizeof(g_dio0Path),
-        "/sys/class/gpio/gpio%d", brcmDio0Pin);
-    g_dio0Path[sizeof(g_dio0Path) - 1] = '\0';
+    snprintf(dio0Path, sizeof(dio0Path), "/sys/class/gpio/gpio%d", brcmDio0Pin);
+    dio0Path[sizeof(dio0Path) - 1] = '\0';
+
+    snprintf(g_dio0ValuePath, sizeof(g_dio0ValuePath), "%s/value", dio0Path);
+    g_dio0ValuePath[sizeof(g_dio0ValuePath) - 1] = '\0';
 
     pFileExport = fopen("/sys/class/gpio/export", "r+b");
-    if (!pFileExport)
+    if (!pFileExport) {
 #if defined(ENABLE_DEBUG_PRINT)
       printf("Failed to open /sys/class/gpio/export.\n");
 #endif /* defined(ENABLE_DEBUG_PRINT) */
@@ -456,11 +465,14 @@ void SetupLoRa()
     fprintf(pFileExport, "%d\n", brcmDio0Pin);
     fclose(pFileExport); pFileExport = 0;
 #if defined(ENABLE_DEBUG_PRINT)
-    printf("Wrote '%d' into /sys/class/gpio/export.\n", brcmDio0Pin0);
+    printf("Wrote '%d' into /sys/class/gpio/export.\n", brcmDio0Pin);
 #endif /* defined(ENABLE_DEBUG_PRINT) */
 
+    /* let system generate gpioN interface */
+    sleep(3);
+
     /* set DIO0 to input */
-    snprintf(path, sizeof(path), "%s/direction", g_dio0Path);
+    snprintf(path, sizeof(path), "%s/direction", dio0Path);
     path[sizeof(path) - 1] = '\0';
 
     pFileDirection = fopen(path, "r+b");
@@ -477,7 +489,7 @@ void SetupLoRa()
 #endif /* defined(ENABLE_DEBUG_PRINT) */
 
     /* set DIO0 interrupt to getting rising-edge */
-    snprintf(path, sizeof(path), "%s/edge", g_dio0Path);
+    snprintf(path, sizeof(path), "%s/edge", dio0Path);
     path[sizeof(path) - 1] = '\0';
 
     pFileEdge = fopen(path, "r+b");
@@ -630,27 +642,21 @@ static bool WaitForDio0_(void)
   int ret = 0;
   struct pollfd fds = { 0 };
 
-  fd = open(g_dio0Path, O_RDONLY);
+  fd = open(g_dio0ValuePath, O_RDONLY);
   if (fd < 0) {
 #if defined(ENABLE_DEBUG_PRINT)
-    printf("Failed to open %s.\n", g_dio0Path);
+    printf("Failed to open %s.\n", g_dio0ValuePath);
 #endif /* defined(ENABLE_DEBUG_PRINT) */
     return false;
   }
 
   /* dummy read */
   {
-    int nr;
-    if (!ioctl(fd, FIONREAD, &nr)) {
-      int i;
-      char c;
+    char c;
+    read(fd, &c, sizeof(c));
 #if defined(ENABLE_DEBUG_PRINT)
-      printf("Need dummy read %d bytes.\n", nr);
+    printf("Dummy read %s got %c.\n", g_dio0ValuePath, c);
 #endif /* defined(ENABLE_DEBUG_PRINT) */
-      for (i = 0 ; i < nr ; ++i) {
-        read(fd, &c, sizeof(c));
-      }
-    }
   }
 
   /* polling gpio */
@@ -662,7 +668,8 @@ static bool WaitForDio0_(void)
   close(fd), fd = -1;
 
 #if defined(ENABLE_DEBUG_PRINT)
-  printf("Polling %s returns %d.\n", g_dio0Path, ret);
+  printf("Polling %s (timeout=%d) returns %d.\n",
+    g_dio0ValuePath, DIO0_ISR_TIMEOUT_MS, ret);
 #endif /* defined(ENABLE_DEBUG_PRINT) */
   return 1 == ret ? true : false;
 }
@@ -681,6 +688,9 @@ bool Receivepacket()
     WaitForDio0_();
 
     if (digitalRead(g_dio0Pin) != 1) {
+#if defined(ENABLE_DEBUG_PRINT)
+        printf("g_dio0Pin not asserted\n");
+#endif /* defined(ENABLE_DEBUG_PRINT) */
         return false;
     }
 #if defined(QUIRK_LORA_PACKET_SIZE)
