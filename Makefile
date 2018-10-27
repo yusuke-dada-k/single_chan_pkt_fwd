@@ -17,7 +17,7 @@ base64.o: base64.c
 	$(CC) $(CFLAGS) base64.c
 
 clean:
-	rm *.o single_chan_pkt_fwd
+	rm -f *.o single_chan_pkt_fwd
 
 install:
 	sudo cp -f ./single_chan_pkt_fwd.service /lib/systemd/system/
