@@ -1036,7 +1036,3 @@ void PrintConfiguration()
   printf("  Latitude=%.8f\n  Longitude=%.8f\n  Altitude=%d\n", g_lat,g_lon,g_alt);
 
 }
-
-
-
-/* vim: set ts=4 sts=4 sw=4 expandtab autoindent : */
