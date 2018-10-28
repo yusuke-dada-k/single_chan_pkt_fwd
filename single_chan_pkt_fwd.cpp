@@ -3,7 +3,7 @@
 
 /* Enable ISR to get DIO0 signal, we need as root */
 #define ENABLE_DIO0_ISR
-#define DIO0_ISR_TIMEOUT_MS (15000)     /* wait timeout in milli-sec */
+#define DIO0_ISR_TIMEOUT_MS (3000)  /* wait timeout in milli-sec */
 
 /* Enable quirk for LoRa driver adding waste 4 bytes at head */
 #define QUIRK_LORA_PACKET_SIZE
