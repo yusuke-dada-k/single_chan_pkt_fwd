@@ -638,6 +638,7 @@ void SendStat()
 #if defined(ENABLE_DIO0_ISR)
 static bool WaitForDio0_(void)
 {
+  char c = 0;
   int fd = -1;
   int ret = 0;
   struct pollfd fds = { 0 };
@@ -649,28 +650,30 @@ static bool WaitForDio0_(void)
 #endif /* defined(ENABLE_DEBUG_PRINT) */
     return false;
   }
-
-  /* dummy read */
-  {
-    char c;
-    read(fd, &c, sizeof(c));
-#if defined(ENABLE_DEBUG_PRINT)
-    printf("Dummy read %s got %c.\n", g_dio0ValuePath, c);
-#endif /* defined(ENABLE_DEBUG_PRINT) */
-  }
-
-  /* polling gpio */
+  fds.fd = fd;
   fds.events = (POLLPRI | POLLERR) ;
   fds.revents = 0;
-  fds.fd = fd;
 
-  ret = poll(&fds, 1, DIO0_ISR_TIMEOUT_MS);
+  /* dummy read */
+  read(fd, &c, sizeof(c));
+  if ('1' == c) {
+#if defined(ENABLE_DEBUG_PRINT)
+    printf("%s already asserted.\n", g_dio0ValuePath);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+    ret = 1;
+
+  } else {
+#if defined(ENABLE_DEBUG_PRINT)
+    printf("Dummy read %s got %c.\n", g_dio0ValuePath, c);
+    printf("Poll %s (timeout=%d).\n", g_dio0ValuePath, DIO0_ISR_TIMEOUT_MS);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+    ret = poll(&fds, 1, DIO0_ISR_TIMEOUT_MS);
+#if defined(ENABLE_DEBUG_PRINT)
+    printf("Polled %s returned %d.\n", g_dio0ValuePath, ret);
+#endif /* defined(ENABLE_DEBUG_PRINT) */
+  }
   close(fd), fd = -1;
 
-#if defined(ENABLE_DEBUG_PRINT)
-  printf("Polling %s (timeout=%d) returns %d.\n",
-    g_dio0ValuePath, DIO0_ISR_TIMEOUT_MS, ret);
-#endif /* defined(ENABLE_DEBUG_PRINT) */
   return 1 == ret ? true : false;
 }
 #else /* defined(ENABLE_DIO0_ISR) */
@@ -689,7 +692,7 @@ bool Receivepacket()
 
     if (digitalRead(g_dio0Pin) != 1) {
 #if defined(ENABLE_DEBUG_PRINT)
-        printf("g_dio0Pin not asserted\n");
+        printf("digitalRead(%d) not asserted.\n", g_dio0Pin);
 #endif /* defined(ENABLE_DEBUG_PRINT) */
         return false;
     }
